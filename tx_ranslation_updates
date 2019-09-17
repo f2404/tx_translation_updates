@@ -1,0 +1,59 @@
+#!/bin/bash
+
+# Defaults
+FROM=$(git describe --abbrev=0) # the latest tag
+TO="HEAD"
+# Only list commits made by Transifex
+CMD="git --no-pager log --committer=Transifex --pretty=%H"
+
+# The function takes an array and prints its unique elements sorted in
+# alphabetical order
+print_uniq() {
+    local arr=("$@")
+    local unique=( $(printf "%s\n" "${arr[@]}" | sort -u) )
+    echo "${unique[@]}" | sed 's/,$//' 
+}
+
+# Parse command line arguments
+while [[ $1 ]]; do
+    case "$1" in
+        -h|--help) echo "$0 [-f|--from revision] [-t|--to revision]"; exit 0;;
+        -f|--from) FROM="$2";;
+        -t|--to)   TO="$2";;
+        *)         PATH="$2";; # not really working...
+    esac
+    shift
+    shift
+done
+
+echo -e "Translation updates from '$FROM' till '$TO'\n"
+
+# Get all translation commits within the revision range
+commits=( $($CMD $FROM..$TO) )
+for ((i = 0; i < ${#commits[@]}; i++)); do
+    # For each commit, get a list of midified files (*.po) and a description
+    files=$(git diff-tree --no-commit-id --name-only -r ${commits[$i]})
+    subj=$(git show -s --format=%s ${commits[$i]})
+    # Look up language name in the .po file; strip part of the string preceding the name;
+    # replace the part following the name with a comma
+    lang=$(grep "Language-Team" $files | sed 's/[^ ]* //' | sed 's/ (http.*/,/')
+
+    if [[ $(echo $subj | grep "Update ") ]]; then
+        updated+=( "$lang" )
+    else
+        new+=( "$lang" )
+    fi
+done
+
+if [[ ${new[0]} ]]; then
+    echo "New translations: $(print_uniq "${new[@]}")"
+
+    # Remove new translations from the list of updated translastions
+    for del in ${new[@]}; do
+        updated=("${updated[@]/$del}")
+    done
+fi
+
+if [[ ${updated[0]} ]]; then
+    echo "Translation updates: $(print_uniq "${updated[@]}")"
+fi
